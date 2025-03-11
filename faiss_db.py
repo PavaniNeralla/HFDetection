@@ -33,7 +33,7 @@ def store_ef_value(text, ef_value, doc_name):
     vector = vector / np.linalg.norm(vector)  
     vector = np.array([vector], dtype=np.float32)
 
-    if vector.shape[0] != faiss_index.d:
+    if vector.shape[1] != faiss_index.d:
         print("Error: FAISS index dimension mismatch!")
         return
 
