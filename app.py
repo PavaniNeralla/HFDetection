@@ -45,21 +45,27 @@ if uploaded_files:
                     continue
 
                 # Extract EF values
-                ef_values, risk_nature = extract_ef_values(ai_analysis)
+                ef_values, _ = extract_ef_values(ai_analysis)  # Ignore risk in this step
 
-                # Determine risk level
-                if risk_nature is None:
-                    risk_nature = determine_risk(ef_values)
+                # 🔹 Filter out NA and "No EF found" values while keeping valid numeric ones
+                ef_values_filtered = {
+                    k: v for k, v in ef_values.items() 
+                    if v not in ["NA", "No EF found"] and any(char.isdigit() for char in v)
+                }
 
-                # Combine EF values for display
-                ef_combined = "; ".join([f"{key}: {value}" for key, value in ef_values.items()])
+                # 🔹 Only determine risk if valid EF values exist
+                if ef_values_filtered:
+                    risk_nature = determine_risk(ef_values_filtered)
+                    ef_combined = "; ".join([f"{key}: {value}" for key, value in ef_values_filtered.items()])
+                else:
+                    risk_nature = "NA"
+                    ef_combined = "No EF Value Found"
+
                 results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": risk_nature, "EF Values": ef_combined})
 
             except Exception as e:
                 st.error(f"❌ Error processing file {uploaded_file.name}: {e}")
 
-            # No file deletion - keeping for future reference
-            #st.info(f"📁 File retained: {pdf_path}")
 
     if results:
         df = pd.DataFrame(results)
