@@ -38,35 +38,54 @@ if uploaded_files:
 
     with st.spinner("Processing the uploaded PDFs... Please wait."):
         for uploaded_file in uploaded_files:
-            pdf_path = os.path.join("temp_files", uploaded_file.name)
-            os.makedirs("temp_files", exist_ok=True)
+            try:
+                pdf_path = os.path.join("temp_files", uploaded_file.name)
+                os.makedirs("temp_files", exist_ok=True)
 
-            with open(pdf_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+                with open(pdf_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
 
-            # Extract text from PDF (try direct extraction first, then OCR)
-            extracted_text = extract_text_from_pdf(pdf_path)
+                # Extract text from PDF (try direct extraction first, then OCR)
+                extracted_text = extract_text_from_pdf(pdf_path)
 
-            # Analyze text with Gemini Pro
-            ai_analysis = analyze_with_gemini(extracted_text)
-            ef_values = extract_ef_values(ai_analysis)
+                # Analyze text with Gemini Pro
+                ai_analysis = analyze_with_gemini(extracted_text)
+                ef_values = extract_ef_values(ai_analysis)
 
-            if not ef_values:
-                results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": "NA", "EF Values": "No EF Value Found"})
+                if not ef_values:
+                    results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": "NA", "EF Values": "No EF Value Found"})
+                else:
+                    ef_combined = "; ".join([f"{ef[0]}: {ef[1]}" for ef in ef_values])
+                    for ef_type, ef_value in ef_values:
+                        store_ef_value(extracted_text, ef_value, uploaded_file.name)
+                    risk_nature = determine_risk(ef_values)
+                    results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": risk_nature, "EF Values": ef_combined})
+
+            except Exception as e:
+                st.error(f"Error processing file {uploaded_file.name}: {e}")
+            finally:
+                # Clean up temporary files
+                if os.path.exists(pdf_path):
+                    os.remove(pdf_path)
+
+    if results:
+        df = pd.DataFrame(results)
+
+        # Define a function to apply conditional formatting
+        def highlight_risk(val):
+            color = 'red' if val == "High Risk" else 'green' if val == "Low Risk" else 'black'
+            return f'color: {color}'
+
+        # Apply conditional formatting and display the DataFrame
+        styled_df = df.style.applymap(highlight_risk, subset=['Risk Nature'])
+
+        with st.expander("View Results"):
+            sort_by = st.selectbox("Sort by", ["Report Name", "EF Values"])
+            if sort_by == "Report Name":
+                df = df.sort_values(by="Report Name")
             else:
-                ef_combined = "; ".join([f"{ef[0]}: {ef[1]}" for ef in ef_values])
-                for ef_type, ef_value in ef_values:
-                    store_ef_value(extracted_text, ef_value, uploaded_file.name)
-                risk_nature = determine_risk(ef_values)
-                results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": risk_nature, "EF Values": ef_combined})
+                df = df.sort_values(by="EF Values")
 
-    df = pd.DataFrame(results)
-
-    # Define a function to apply conditional formatting
-    def highlight_risk(val):
-        color = 'red' if val == "High Risk" else 'green' if val == "Low Risk" else 'black'
-        return f'color: {color}'
-
-    # Apply conditional formatting and display the DataFrame
-    styled_df = df.style.applymap(highlight_risk, subset=['Risk Nature'])
-    st.markdown(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+            st.markdown(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+    else:
+        st.info("No files uploaded or no EF values found.")
