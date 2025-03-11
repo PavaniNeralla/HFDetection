@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from ocr_extraction import extract_text_from_pdf
 from gemini_analysis import analyze_with_gemini
+from extract_ef import extract_ef_values, determine_risk
 
 # Streamlit UI
 st.set_page_config(page_title="EF Value Extractor", layout="centered")
@@ -10,66 +11,55 @@ st.title("HF Detection")
 
 uploaded_files = st.file_uploader("📂 Upload Scanned PDFs", type="pdf", accept_multiple_files=True)
 
-def extract_ef_values(text):
-    """Extracts EF-related values including LVEF, EF-A2C, EF-A4C, and others."""
-    ef_values = []
-    lines = text.split('\n')
-    for line in lines:
-        if ':' in line:
-            key, value = line.split(':', 1)
-            key = key.strip()
-            value = value.strip().split()[0]  # Get the first part of the value
-            if value.endswith('%'):
-                value = value[:-1]
-            try:
-                value = float(value)
-                ef_values.append((key, value))
-            except ValueError:
-                continue
-    return ef_values
-
-def determine_risk(ef_values):
-    """Determines patient risk based on EF values (High Risk if any EF <40)."""
-    for _, ef_value in ef_values:
-        if ef_value < 40.0:
-            return "High Risk"
-    return "Low Risk"
-
 if uploaded_files:
     results = []
+    os.makedirs("temp_files", exist_ok=True)  # Ensure temp_files directory exists
 
     with st.spinner("Processing the uploaded PDFs... Please wait."):
         for uploaded_file in uploaded_files:
             try:
                 pdf_path = os.path.join("temp_files", uploaded_file.name)
-                os.makedirs("temp_files", exist_ok=True)
 
+                # Save the uploaded file
                 with open(pdf_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
+                #st.success(f"✅ File saved successfully: {pdf_path}")
 
-                # Extract text from PDF (try direct extraction first, then OCR)
+                # Ensure the file exists before proceeding
+                if not os.path.exists(pdf_path):
+                    st.error(f"❌ Error: File {pdf_path} was not saved properly.")
+                    continue
+
+                # Extract text from PDF
                 extracted_text = extract_text_from_pdf(pdf_path)
-                st.write(f"Extracted Text: {extracted_text}")  # Debugging information
+                if not extracted_text.strip():
+                    st.warning(f"⚠️ No text extracted from {uploaded_file.name}. Skipping.")
+                    results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": "NA", "EF Values": "No EF Value Found"})
+                    continue
 
                 # Analyze text with Gemini Pro
                 ai_analysis = analyze_with_gemini(extracted_text)
-                st.write(f"AI Analysis: {ai_analysis}")  # Debugging information
-                ef_values = extract_ef_values(ai_analysis)
-                st.write(f"Extracted EF Values: {ef_values}")  # Debugging information
-
-                if not ef_values:
+                if not ai_analysis.strip():
+                    st.warning(f"⚠️ Gemini API did not return a valid response for {uploaded_file.name}. Skipping.")
                     results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": "NA", "EF Values": "No EF Value Found"})
-                else:
-                    ef_combined = "; ".join([f"{ef[0]}: {ef[1]}%" for ef in ef_values])
+                    continue
+
+                # Extract EF values
+                ef_values, risk_nature = extract_ef_values(ai_analysis)
+
+                # Determine risk level
+                if risk_nature is None:
                     risk_nature = determine_risk(ef_values)
-                    results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": risk_nature, "EF Values": ef_combined})
+
+                # Combine EF values for display
+                ef_combined = "; ".join([f"{key}: {value}" for key, value in ef_values.items()])
+                results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": risk_nature, "EF Values": ef_combined})
 
             except Exception as e:
-                st.error(f"Error processing file {uploaded_file.name}: {e}")
-            finally:
-                # Clean up temporary files
-                if os.path.exists(pdf_path):
-                    os.remove(pdf_path)
+                st.error(f"❌ Error processing file {uploaded_file.name}: {e}")
+
+            # No file deletion - keeping for future reference
+            #st.info(f"📁 File retained: {pdf_path}")
 
     if results:
         df = pd.DataFrame(results)
