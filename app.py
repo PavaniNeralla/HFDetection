@@ -1,36 +1,38 @@
 import streamlit as st
 import os
 import pandas as pd
-import re
 from ocr_extraction import extract_text_from_pdf
-from faiss_db import store_ef_value
 from gemini_analysis import analyze_with_gemini
 
 # Streamlit UI
 st.set_page_config(page_title="EF Value Extractor", layout="centered")
-st.title("HF Detector")
+st.title("HF Detection")
 
-uploaded_files = st.file_uploader("📂 Drop Patient Summary Files", type="pdf", accept_multiple_files=True)
+uploaded_files = st.file_uploader("📂 Upload Scanned PDFs", type="pdf", accept_multiple_files=True)
 
 def extract_ef_values(text):
-    """Extracts EF-related values including LVEF, EF-A2C, EF-A4C, and ranges."""
-    ef_pattern = re.compile(r'(LVEF|EF(?:-A2C|-A4C|-Biplane|-PLAX|-PSAX|-Subcostal|-Other|-Global|-Mmode)?)[^\d]*(\d{1,3}(?:\.\d+)?)\s*(?:-|to)?\s*(\d{1,3}(?:\.\d+)?)?\s*[%o/o]?', re.IGNORECASE)
-    matches = ef_pattern.findall(text)
-    return [(m[0], m[1] if not m[2] else f"{m[1]}-{m[2]}") for m in matches]
+    """Extracts EF-related values including LVEF, EF-A2C, EF-A4C, and others."""
+    ef_values = []
+    lines = text.split('\n')
+    for line in lines:
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip()
+            value = value.strip().split()[0]  # Get the first part of the value
+            if value.endswith('%'):
+                value = value[:-1]
+            try:
+                value = float(value)
+                ef_values.append((key, value))
+            except ValueError:
+                continue
+    return ef_values
 
 def determine_risk(ef_values):
     """Determines patient risk based on EF values (High Risk if any EF <40)."""
     for _, ef_value in ef_values:
-        ef_value = ef_value.replace("%", "").strip()
-        try:
-            if '-' in ef_value:
-                low, _ = map(float, ef_value.split('-'))
-                if low < 40.0:
-                    return "High Risk"
-            elif float(ef_value) < 40.0:
-                return "High Risk"
-        except ValueError:
-            continue
+        if ef_value < 40.0:
+            return "High Risk"
     return "Low Risk"
 
 if uploaded_files:
@@ -47,17 +49,18 @@ if uploaded_files:
 
                 # Extract text from PDF (try direct extraction first, then OCR)
                 extracted_text = extract_text_from_pdf(pdf_path)
+                st.write(f"Extracted Text: {extracted_text}")  # Debugging information
 
                 # Analyze text with Gemini Pro
                 ai_analysis = analyze_with_gemini(extracted_text)
+                st.write(f"AI Analysis: {ai_analysis}")  # Debugging information
                 ef_values = extract_ef_values(ai_analysis)
+                st.write(f"Extracted EF Values: {ef_values}")  # Debugging information
 
                 if not ef_values:
                     results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": "NA", "EF Values": "No EF Value Found"})
                 else:
-                    ef_combined = "; ".join([f"{ef[0]}: {ef[1]}" for ef in ef_values])
-                    for ef_type, ef_value in ef_values:
-                        store_ef_value(extracted_text, ef_value, uploaded_file.name)
+                    ef_combined = "; ".join([f"{ef[0]}: {ef[1]}%" for ef in ef_values])
                     risk_nature = determine_risk(ef_values)
                     results.append({"Report Name": uploaded_file.name.replace(".pdf", ""), "Risk Nature": risk_nature, "EF Values": ef_combined})
 
@@ -76,16 +79,10 @@ if uploaded_files:
             color = 'red' if val == "High Risk" else 'green' if val == "Low Risk" else 'black'
             return f'color: {color}'
 
-        # Apply conditional formatting and display the DataFrame
+        # Apply conditional formatting
         styled_df = df.style.applymap(highlight_risk, subset=['Risk Nature'])
 
-        with st.expander("View Results"):
-            sort_by = st.selectbox("Sort by", ["Report Name", "EF Values"])
-            if sort_by == "Report Name":
-                df = df.sort_values(by="Report Name")
-            else:
-                df = df.sort_values(by="EF Values")
-
-            st.markdown(styled_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+        st.write("### Extracted EF Values")
+        st.dataframe(styled_df, use_container_width=True)
     else:
         st.info("No files uploaded or no EF values found.")
