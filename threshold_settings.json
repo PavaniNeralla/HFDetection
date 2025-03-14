@@ -1,0 +1,12 @@
+{
+    "EF": {
+        "condition": "less than",
+        "value": 40,
+        "value2": null
+    },
+    "BMI": {
+        "condition": "greater than",
+        "value": 10,
+        "value2": null
+    }
+}
