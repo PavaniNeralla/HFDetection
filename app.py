@@ -2,9 +2,6 @@ import streamlit as st
 import os
 import json
 import pandas as pd
-from ocr_extraction import extract_text_from_pdf
-from gemini_analysis import analyze_with_gemini, parse_gemini_response
-from risk_analysis import determine_risk
 from process_file import process_uploaded_file
 
 # Load or initialize threshold settings
@@ -27,8 +24,79 @@ if "threshold_settings" not in st.session_state:
     st.session_state["threshold_settings"] = load_threshold_settings()
 
 # Streamlit UI
-st.set_page_config(page_title="Threshold Settings", layout="wide")
-st.title("HF Detector")
+st.set_page_config(page_title="HF Detector", layout="wide", initial_sidebar_state="expanded")
+st.markdown(
+    """
+    <style>
+        /* Center the title */
+        .css-1n5p33s {
+            text-align: center;
+        }
+        
+        /* Hide stop and deploy options */
+        .css-1irwz68, .css-1i5ow7f, .css-16xt4j7 {
+            visibility: hidden;
+        }
+
+        /* Customize button styling */
+        .stButton>button {
+            width: 100%;
+            margin-bottom: 8px;
+            border: none;
+            background-color: #444; /* Dark background (adjust as needed) */
+            color: white;
+            font-size: 16px;
+            text-align: center;
+            border-radius: 5px;
+            padding: 10px;
+        }
+        .stButton>button:hover {
+            background-color: #444;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# Center the title
+st.title("HF Detector 🩺")
+
+# File upload section in the sidebar
+st.sidebar.title("Menu")
+uploaded_files = st.sidebar.file_uploader("Upload Patient Reports", type="pdf", accept_multiple_files=True)
+
+# When "Extract EF & Metrics" button is clicked, start processing
+if st.sidebar.button("Extract EF & Metrics"):
+    if uploaded_files:
+        # Initialize results and process files
+        results = []
+        os.makedirs("temp_files", exist_ok=True)
+
+        with st.spinner("Processing the uploaded PDFs... Please wait."):
+            for uploaded_file in uploaded_files:
+                result = process_uploaded_file(uploaded_file, st.session_state["threshold_settings"])
+                results.append(result)
+
+        if results:
+            # Display extracted results
+            df = pd.DataFrame(results)
+
+            # Drop the "Serial No" column to hide it
+            if 'Serial No' in df.columns:
+                df = df.drop(columns=['Serial No'])
+
+            def highlight_risk(val):
+                color = 'red' if val == "High Risk" else 'green' if val == "Low Risk" else 'black'
+                return f'color: {color}'
+
+            styled_df = df.style.map(highlight_risk, subset=['Risk Nature'])
+            st.write("### Extracted EF and Additional Metrics")
+            st.dataframe(styled_df, use_container_width=True)
+
+        else:
+            st.info("No files uploaded or no EF/metric values found.")
+    else:
+        st.error("Please upload at least one PDF file to extract EF and metrics.")
 
 # Sidebar for adding new metric thresholds
 st.sidebar.header("➕ Add Metric Threshold")
@@ -55,7 +123,7 @@ with st.sidebar.form("threshold_form"):
             st.warning("⚠️ Please enter a valid metric name.")
 
 # Display saved threshold settings in an expander in the sidebar
-with st.sidebar.expander("📌 Saved Threshold Settings", expanded=False):
+with st.sidebar.expander("📌 Saved Threshold Metrics", expanded=False):
     saved_settings = st.session_state["threshold_settings"]
     if saved_settings:
         df = pd.DataFrame.from_dict(saved_settings, orient='index')
@@ -63,27 +131,3 @@ with st.sidebar.expander("📌 Saved Threshold Settings", expanded=False):
     else:
         st.write("No saved thresholds yet.")
 
-# File processing logic
-uploaded_files = st.file_uploader("📂 Upload Scanned PDFs", type="pdf", accept_multiple_files=True)
-
-if uploaded_files:
-    results = []
-    os.makedirs("temp_files", exist_ok=True)
-
-    with st.spinner("Processing the uploaded PDFs... Please wait."):
-        for uploaded_file in uploaded_files:
-            result = process_uploaded_file(uploaded_file, st.session_state["threshold_settings"])
-            results.append(result)
-
-    if results:
-        df = pd.DataFrame(results)
-
-        def highlight_risk(val):
-            color = 'red' if val == "High Risk" else 'green' if val == "Low Risk" else 'black'
-            return f'color: {color}'
-
-        styled_df = df.style.map(highlight_risk, subset=['Risk Nature'])
-        st.write("### Extracted EF and Additional Metrics")
-        st.dataframe(styled_df, use_container_width=True)
-    else:
-        st.info("No files uploaded or no EF/metric values found.")
