@@ -1,38 +1,59 @@
 import re
+import json
+import os
 
-def extract_ef_values(text):
-    """Extracts EF values from text, replacing missing values with 'NA'. If all are missing, return overall 'NA'."""
-    ef_keys = ["LVEF", "EF-A2C", "EF-A4C", "EF-Biplane", "EF-PLAX", "EF-PSAX", 
-               "EF-Subcostal", "EF-Other", "EF-Global", "EF-Mmode"]
-    ef_values = {key: "NA" for key in ef_keys}  # Default all EF values to "NA"
+# Load threshold settings from JSON file
+THRESHOLD_FILE = "threshold_settings.json"
 
-    found_any_value = False  # Flag to track if any EF value is found
+def load_threshold_settings():
+    """Load metric threshold settings from a JSON file."""
+    if os.path.exists(THRESHOLD_FILE):
+        with open(THRESHOLD_FILE, "r") as file:
+            return json.load(file)
+    return {}
 
-    for line in text.split("\n"):
-        match = re.match(r"(LVEF|EF-[A-Za-z0-9]+):\s*([\d.]+(?:\s*to\s*[\d.]+)?|\bNo EF found\b)", line, re.IGNORECASE)
-        if match:
-            key, value = match.groups()
-            if value and "No EF found" not in value:
-                ef_values[key] = value.strip()
-                found_any_value = True  # At least one EF value found
+# Ensure correct extraction of EF values
+def extract_values(ai_output):
+    extracted_values = {}
+    
+    # Split lines and parse CSV format
+    lines = ai_output.strip().split("\n")[1:]  # Skip header row
+    
+    for line in lines:
+        try:
+            metric, value = line.split(",", 1)  # Ensure only first comma is split
+            metric = metric.strip()
+            value = value.strip()
 
-    # If no valid EF values were found, return all "NA" and mark risk as "NA"
-    if not found_any_value:
-        return {key: "NA" for key in ef_keys}, "NA"
+            # Normalize values: Convert "No EF-PLAX found" to "NA"
+            if "No" in value:
+                value = "NA"
 
-    return ef_values, None  # None means risk should be determined
+            extracted_values[metric] = value
+        except ValueError:
+            continue  # Skip malformed lines
+
+    return extracted_values
 
 
-def determine_risk(ef_values):
-    """Determines risk based on EF values. High Risk if any EF < 40%. Returns NA if all EF values are missing."""
-    if all(value == "NA" for value in ef_values.values()):
-        return "NA"
+# ✅ Determine Risk Dynamically
+def determine_risk(risk_values, threshold_settings):
+    for metric, value in risk_values.items():
+        threshold = threshold_settings.get(metric, {})
+        condition = threshold.get("condition", "less than")
+        limit1 = threshold.get("value", 40)
+        limit2 = threshold.get("value2", None)
 
-    for value in ef_values.values():
-        match = re.search(r"(\d+)(?:\s*to\s*(\d+))?", value)  # Matches single or range values
-        if match:
-            lower_bound = float(match.group(1))
-            if lower_bound < 40.0:
+        # ✅ Ensure EF values below the threshold are correctly classified as High Risk
+        if "EF" in metric and value < 40:  
+            return "High Risk"
+        
+        if condition == "less than" and value < limit1:
+            return "High Risk"
+        elif condition == "greater than" and value > limit1:
+            return "High Risk"
+        elif condition == "between" and limit2 is not None:
+            if not (limit1 <= value <= limit2):
                 return "High Risk"
-
     return "Low Risk"
+    

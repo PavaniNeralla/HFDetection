@@ -1,38 +1,43 @@
-import fitz  # PyMuPDF
+import cv2
 import pytesseract
-from PIL import Image
-import io
+import fitz  # PyMuPDF
+import numpy as np
 
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Specify the path to the Tesseract executable
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+def preprocess_image(image):
+    """Preprocess the image for better OCR accuracy."""
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Apply thresholding
+    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+    
+    # Remove noise
+    kernel = np.ones((1, 1), np.uint8)
+    processed_image = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    
+    return processed_image
 
 def extract_text_from_pdf(pdf_path):
-    """Extracts text from a PDF. Falls back to OCR if direct extraction fails."""
-    try:
-        # Try to extract text directly from the PDF
-        doc = fitz.open(pdf_path)
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text()
+    """Extracts text from a PDF file using OCR."""
+    # Open the PDF file
+    pdf_document = fitz.open(pdf_path)
+    text = ""
+    
+    for page_num in range(len(pdf_document)):
+        # Get the page
+        page = pdf_document.load_page(page_num)
         
-        # If text is found, return it
-        if full_text.strip():
-            return " ".join(full_text.split())
+        # Convert the page to an image
+        pix = page.get_pixmap()
+        image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
         
-        # If no text is found, fall back to OCR
-        raise ValueError("No text found, falling back to OCR")
-
-    except Exception as e:
-        print(f"Direct text extraction failed: {e}. Falling back to OCR.")
-        # Fall back to OCR
-        doc = fitz.open(pdf_path)
-        full_text = ""
-        for page in doc:
-            images = page.get_images(full=True)
-            for img in images:
-                xref = img[0]
-                base_image = doc.extract_image(xref)
-                img = Image.open(io.BytesIO(base_image["image"]))
-                text = pytesseract.image_to_string(img, config="--psm 6")
-                full_text += " " + text
-
-        return " ".join(full_text.split())
+        # Preprocess the image
+        processed_image = preprocess_image(image)
+        
+        # Perform OCR on the preprocessed image
+        text += pytesseract.image_to_string(processed_image)
+    
+    return text

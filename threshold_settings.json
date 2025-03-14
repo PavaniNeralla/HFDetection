@@ -6,7 +6,7 @@
     },
     "BMI": {
         "condition": "greater than",
-        "value": 50,
+        "value": 10,
         "value2": null
     }
 }
