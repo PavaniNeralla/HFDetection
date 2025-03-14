@@ -5,7 +5,7 @@
         "value2": null
     },
     "BMI": {
-        "condition": "greater than",
+        "condition": "less than",
         "value": 10,
         "value2": null
     }

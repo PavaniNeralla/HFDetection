@@ -24,7 +24,7 @@ if "threshold_settings" not in st.session_state:
     st.session_state["threshold_settings"] = load_threshold_settings()
 
 # Streamlit UI
-st.set_page_config(page_title="HF Detector", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Heart Failure Detector", layout="wide", initial_sidebar_state="expanded")
 st.markdown(
     """
     <style>
@@ -77,50 +77,117 @@ if st.sidebar.button("Extract EF & Metrics"):
                 result = process_uploaded_file(uploaded_file, st.session_state["threshold_settings"])
                 results.append(result)
 
-        if results:
-            # Display extracted results
-            df = pd.DataFrame(results)
+    if results:
+    # Display extracted results
+        df = pd.DataFrame(results)
+        df = df.sort_values(
+            by="Risk Nature",
+            ascending=False,
+            key=lambda col: col.str.contains("High Risk").astype(int)
+        )
 
-            # Drop the "Serial No" column to hide it
-            if 'Serial No' in df.columns:
-                df = df.drop(columns=['Serial No'])
+        # Drop the "Serial No" column to hide it
+        if 'Serial No' in df.columns:
+            df = df.drop(columns=['Serial No'])
 
-            def highlight_risk(val):
-                color = 'red' if val == "High Risk" else 'green' if val == "Low Risk" else 'black'
-                return f'color: {color}'
+        # Function to create expandable HTML content for EF Values
+        def make_expandable_ef_html(values):
+            try:
+                # Split EF values based on the delimiter (e.g., '; ') and format them as a list
+                ef_values_html = "".join(f"<li><b>{item.split(':')[0].strip()}</b>: {item.split(':')[1].strip()}</li>"
+                                        for item in values.split(';') if ':' in item)
+                html = f"""
+                <details>
+                <summary>View Metrics</summary>
+                <ul>
+                    {ef_values_html}
+                </ul>
+                </details>
+                """
+                return html.replace("\n", "")  # Return clean, expandable HTML
+            except Exception:
+                return values  # Return original values if there's an error
 
-            styled_df = df.style.map(highlight_risk, subset=['Risk Nature'])
+        # Apply the function to the EF Values column (if it exists)
+        if "EF Values" in df.columns:
+            df["EF Values"] = df["EF Values"].apply(make_expandable_ef_html)
+
+        # Add color for "Risk Nature" column
+        def color_risk(risk):
+            if risk == "High Risk":
+                return f"<span style='color: red;'>{risk}</span>"
+            elif risk == "Low Risk":
+                return f"<span style='color: green;'>{risk}</span>"
+            else:
+                return risk  # Default for other risk levels
+
+        # Apply the color formatting to the "Risk Nature" column
+        if "Risk Nature" in df.columns:
+            df["Risk Nature"] = df["Risk Nature"].apply(color_risk)
+
+        # Convert the DataFrame to an HTML table for rendering
+        table_html = df.to_html(escape=False, index=False)
+
+        # Use a wider container for better use of screen space
+        with st.container():
             st.write("### Extracted EF and Additional Metrics")
-            st.dataframe(styled_df, use_container_width=True)
+            st.markdown(
+                """
+                <style>
+                table {
+                    width: 100%; /* Use full width of the container */
+                    border-collapse: separate; /* Separate borders for better visuals */
+                    border-spacing: 0; /* Remove extra spacing between cells */
+                    border: 1px solid #ddd; /* Add a soft border around the table */
+                    border-radius: 12px; /* Smooth, rounded corners */
+                    overflow: hidden; /* Clip content inside rounded corners */
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+                }
+                th {
+                    text-align: center; /* Horizontal center alignment for headers */
+                    vertical-align: middle; /* Vertical center alignment for headers */
+                    padding: 12px; /* Add padding for better spacing */
+                    background-color: #f9f9f9; /* Light background for headers */
+                    border-bottom: 1px solid #ddd; /* Border separating headers */
+                    font-weight: bold; /* Make headers bold for clarity */
+                }
+                td {
+                    text-align: left; /* Align cell content to the left */
+                    padding: 12px; /* Add consistent padding */
+                    border-bottom: 1px solid #ddd; /* Border between rows */
+                }
+                tr:last-child td {
+                    border-bottom: none; /* Remove bottom border for the last row */
+                }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+            st.markdown(table_html, unsafe_allow_html=True)
 
-        else:
-            st.info("No files uploaded or no EF/metric values found.")
     else:
-        st.error("Please upload at least one PDF file to extract EF and metrics.")
+        st.info("No files uploaded or no EF/metric values found.")
 
-# Sidebar for adding new metric thresholds
 st.sidebar.header("➕ Add Metric Threshold")
 
-with st.sidebar.form("threshold_form"):
-    metric = st.text_input("Enter Metric Name", placeholder="e.g., BMI, EF-A2C, BP")
-    condition = st.selectbox("Select Condition", ["greater than", "less than", "between"])
-    value = st.number_input("Enter Value", min_value=0, max_value=500, value=50)
-    value2 = None
-    if condition == "between":
-        value2 = st.number_input("Enter Second Value", min_value=0, max_value=500, value=60)
-
-    submitted = st.form_submit_button("Save Threshold")
-    if submitted:
-        if metric:
-            st.session_state["threshold_settings"][metric] = {
-                "condition": condition,
-                "value": value,
-                "value2": value2
-            }
-            save_threshold_settings(st.session_state["threshold_settings"])
-            st.success(f"✅ Threshold for '{metric}' saved successfully!")
-        else:
-            st.warning("⚠️ Please enter a valid metric name.")
+metric = st.sidebar.text_input("Enter Metric Name", placeholder="e.g., BMI, EF-A2C, BP")
+condition = st.sidebar.selectbox("Select Condition", ["greater than", "less than", "between"])
+value = st.sidebar.number_input("Enter Value", min_value=0, max_value=500, value=50)
+value2 = None
+if condition == "between":
+    value2 = st.sidebar.number_input("Enter Second Value", min_value=0, max_value=500, value=60)
+# Sidebar button for saving thresholds
+if st.sidebar.button("Save Threshold"):
+    if metric:
+        st.session_state["threshold_settings"][metric] = {
+            "condition": condition,
+            "value": value,
+            "value2": value2
+        }
+        save_threshold_settings(st.session_state["threshold_settings"])
+        st.sidebar.success(f"Threshold for '{metric}' saved successfully!")
+    else:
+        st.sidebar.warning("Please enter a valid metric name.")
 
 # Display saved threshold settings in an expander in the sidebar
 with st.sidebar.expander("📌 Saved Threshold Metrics", expanded=False):
